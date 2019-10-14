@@ -1,0 +1,13 @@
+* text=auto
+*.dll binary
+*.exe binary
+*.gif binary
+*.ico binary
+*.iso binary
+*.jpeg binary
+*.jpg binary
+*.pdf binary
+*.png binary
+*.torrent binary
+*.webp binary
+*.zip binary

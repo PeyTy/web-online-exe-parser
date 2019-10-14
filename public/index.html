@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>PeyTy's online EXE parser</title>
+</head>
+
+<body>
+  <style type="text/css">
+  body {
+    font-family: sans-serif;
+  }
+
+  a {
+    color: #369;
+  }
+
+  .note {
+    width: 700px;
+    margin: 50px auto;
+    font-size: 1.1em;
+    color: #333;
+    text-align: justify;
+  }
+
+  #drop-area {
+    border: 2px dashed #ccc;
+    border-radius: 20px;
+    width: 680px;
+    margin: 50px auto;
+    padding: 20px;
+  }
+
+  #drop-area.highlight {
+    border-color: purple;
+  }
+
+  p {
+    margin-top: 0;
+  }
+
+  .my-form {
+    margin-bottom: 10px;
+  }
+
+  #gallery {
+    margin-top: 10px;
+  }
+
+  #gallery img {
+    /*width: 150px;*/
+    margin-bottom: 10px;
+    margin-right: 10px;
+    vertical-align: middle;
+  }
+
+  .button {
+    display: inline-block;
+    padding: 10px;
+    background: #ccc;
+    cursor: pointer;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    color: white;
+  }
+
+  .button:hover {
+    background: #ddd;
+  }
+
+  #fileElem {
+    display: none;
+  }
+
+  </style>
+  <div>
+    <div id="drop-area">
+      <form class="my-form">
+        <p>Drop your .exe or .dll file here</p>
+        <p>Love online tools useful directly without installation? <a href="https://www.patreon.com/PeyTy">My Patreon!</a></p>
+        <input type="file" id="fileElem" accept="*/*" onchange="handleFile(this.files)">
+        <label class="button" for="fileElem"><strong>Select some file</strong></label>
+      </form>
+      <div id="icons"></div>
+      <div id="gallery"></div>
+    </div>
+  </div>
+  <div class="note">
+  </div>
+  </div>
+  <script type="text/javascript">
+  // ************************ Drag and drop ***************** //
+  let dropArea = document.getElementById("drop-area")
+
+  // Prevent default drag behaviors
+  ;
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    dropArea.addEventListener(eventName, preventDefaults, false)
+    document.body.addEventListener(eventName, preventDefaults, false)
+  })
+
+  // Highlight drop area when item is dragged over it
+  ;
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropArea.addEventListener(eventName, highlight, false)
+  })
+
+  ;
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropArea.addEventListener(eventName, unhighlight, false)
+  })
+
+  // Handle dropped files
+  dropArea.addEventListener('drop', handleDrop, false)
+
+  function preventDefaults(e) {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  function highlight(e) {
+    dropArea.classList.add('highlight')
+  }
+
+  function unhighlight(e) {
+    dropArea.classList.remove('active')
+  }
+
+  function handleDrop(e) {
+    var dt = e.dataTransfer
+    var files = dt.files
+
+    handleFile(files)
+  }
+
+  function handleFile(files) {
+    files = [...files]
+    files.forEach(previewFile)
+  }
+
+  function previewFile(file) {
+    let reader = new FileReader()
+    //reader.readAsDataURL(file)
+    //reader.onloadend = function() {
+    //  let img = document.createElement('img')
+    //  img.src = reader.result
+    //  document.getElementById('gallery').appendChild(img)
+    //}
+    reader.onloadend = function() {
+      console.log(reader.result)
+      console.log(file)
+      document.getElementById('icons').innerHTML = ''
+      let buffer = reader.result
+      let u8 = new Uint8Array(reader.result)
+      let result = []
+      let what
+      let temp
+
+      function printf(text) {
+        result.push(`<div>${text}</div>`)
+      }
+
+      let at = 0
+
+      function seek(byte) {
+        at = byte
+      }
+
+      function nextU8() {
+        let pos = at
+        at += 1
+        return u8[pos]
+      }
+
+      function nextU16() {
+        let pos = at
+        at += 2
+        return u8[pos] + u8[pos + 1] * 256
+      }
+
+      function nextU32() {
+        let pos = at
+        at += 4
+        return u8[pos] +
+          u8[pos + 1] * 256 +
+          u8[pos + 2] * 256 * 256 +
+          u8[pos + 3] * 256 * 256 * 256
+      }
+
+      function nextU64() {
+        let pos = at
+        at += 8
+        return u8[pos] +
+          u8[pos + 1] * 256 +
+          u8[pos + 2] * 256 * 256 +
+          u8[pos + 3] * 256 * 256 * 256 +
+          u8[pos + 4] * 256 * 256 * 256 * 256 +
+          u8[pos + 5] * 256 * 256 * 256 * 256 * 256 +
+          u8[pos + 6] * 256 * 256 * 256 * 256 * 256 * 256 +
+          u8[pos + 7] * 256 * 256 * 256 * 256 * 256 * 256 * 256
+      }
+
+      const stack = []
+
+      function push(pos) {
+        stack.push(at)
+        at = pos
+      }
+
+      function pop() {
+        at = stack.pop()
+      }
+
+      printf(`File name is '${file.name}'`)
+      printf(`File size is ${buffer.byteLength} bytes`)
+      let magic = String.fromCharCode(u8[0], u8[1])
+      printf(`File magic is is '${magic}'`)
+      if (magic != 'MZ') printf(`<strong>NOT A VALID PE FILE</strong>`)
+
+      let peHeader = u8[0x3C] + u8[0x3C + 1] * 256
+      printf("PE header at " + peHeader + " byte")
+
+      seek(peHeader)
+      printf("Header.mMagic = '" + String.fromCharCode(nextU8(), nextU8()) + "'")
+      nextU16(); // PE\0\0 or 0x00004550
+      printf(`Header.mMachine = ${{
+        0x8664: 'x86-64',
+        0x14c: 'x86-32',
+      }[nextU16()]}`) //uint16_t mMachine;
+      printf(`Header.mNumberOfSections = ${mNumberOfSections = nextU16()}`)
+      printf(`Header.mTimeDateStamp = ${new Date(nextU32() * 1000)}`)
+      printf(`Header.mPointerToSymbolTable = ${mPointerToSymbolTable = nextU32()}`)
+      printf(`Header.mNumberOfSymbols = ${mNumberOfSymbols = nextU32()}`)
+      printf(`Header.mSizeOfOptionalHeader = ${mSizeOfOptionalHeader = nextU16()}`)
+      printf(`Header.mCharacteristics = ${mCharacteristics = nextU16()}`)
+
+      printf("PE is '" + ['exe', 'dll'][mCharacteristics & 0x2000 ? 1 : 0] + "'")
+      printf(`PE optional header at ${at} byte`)
+      const optionalAt = at
+
+      if (mSizeOfOptionalHeader > 0) {
+        printf(`OptionalHeader.mMagic = ${mMagic = nextU16()}`)
+        printf(`OptionalHeader.mMagic = ${{
+          0x010b: 'PE32 (32 bit)',
+          0x020b: 'PE32+ (64 bit)',
+        }[mMagic]}`)
+
+        const bits64 = mMagic == 0x020b
+
+        printf(`OptionalHeader.mMajorLinkerVersion = ${mMajorLinkerVersion = nextU8()}`)
+        printf(`OptionalHeader.mMinorLinkerVersion = ${mMinorLinkerVersion = nextU8()}`)
+        printf(`OptionalHeader.mSizeOfCode = ${mSizeOfCode = nextU32()}`)
+        printf(`OptionalHeader.mSizeOfInitializedData = ${mSizeOfInitializedData = nextU32()}`)
+        printf(`OptionalHeader.mSizeOfUninitializedData = ${mSizeOfUninitializedData = nextU32()}`)
+        printf(`OptionalHeader.mAddressOfEntryPoint = ${mAddressOfEntryPoint = nextU32()}`)
+        printf(`OptionalHeader.mBaseOfCode = ${mBaseOfCode = nextU32()}`)
+        mBaseOfData = 0
+        if (mMagic == 0x010b) printf(`OptionalHeader.mBaseOfData = ${mBaseOfData = nextU32()}`)
+        if (mMagic != 0x010b) printf(`OptionalHeader.mImageBase = ${mImageBase = nextU64()}`) // uint64_t mImageBase
+        if (mMagic == 0x010b) printf(`OptionalHeader.mImageBase = ${mImageBase = nextU32()}`) // uint64_t mImageBase
+        printf(`OptionalHeader.mSectionAlignment = ${mSectionAlignment = nextU32()}`) // uint32_t mSectionAlignment
+        printf(`OptionalHeader.mFileAlignment = ${mFileAlignment = nextU32()}`) // uint32_t mFileAlignment
+        printf(`OptionalHeader.mMajorOperatingSystemVersion = ${mMajorOperatingSystemVersion = nextU16()}`) // uint16_t mMajorOperatingSystemVersion
+        printf(`OptionalHeader.mMinorOperatingSystemVersion = ${mMinorOperatingSystemVersion = nextU16()}`) // uint16_t mMinorOperatingSystemVersion
+        printf(`OptionalHeader.*OperatingSystemVersion = ${
+          {
+            '3.1': 'Windows NT 3.1',
+            '3.5': 'Windows NT 3.5',
+            '3.51': 'Windows NT 3.51',
+            '4.0': 'Windows NT 4.0 Server',
+            '5.0': 'Windows 2000',
+            '5.1': 'Windows XP',
+            '5.2': 'Windows Server 2003',
+            '6.0': 'Windows Vista',
+            '6.1': 'Windows 7',
+            '6.2': 'Windows 8',
+            '6.3': 'Windows 8.1',
+            '10.0': 'Windows 10',
+          }[mMajorOperatingSystemVersion + '.' + mMinorOperatingSystemVersion]
+        }`)
+        printf(`OptionalHeader.mMajorImageVersion = ${mMajorImageVersion = nextU16()}`) // uint16_t mMajorImageVersion
+        printf(`OptionalHeader.mMinorImageVersion = ${mMinorImageVersion = nextU16()}`) // uint16_t mMinorImageVersion
+        printf(`OptionalHeader.mMajorSubsystemVersion = ${mMajorSubsystemVersion = nextU16()}`) // uint16_t mMajorSubsystemVersion
+        printf(`OptionalHeader.mMinorSubsystemVersion = ${mMinorSubsystemVersion = nextU16()}`) // uint16_t mMinorSubsystemVersion
+        printf(`OptionalHeader.*SubsystemVersion = ${
+          {
+            '3.1': 'Windows NT 3.1',
+            '3.5': 'Windows NT 3.5',
+            '3.51': 'Windows NT 3.51',
+            '4.0': 'Windows NT 4.0 Server',
+            '5.0': 'Windows 2000',
+            '5.1': 'Windows XP',
+            '5.2': 'Windows Server 2003',
+            '6.0': 'Windows Vista',
+            '6.1': 'Windows 7',
+            '6.2': 'Windows 8',
+            '6.3': 'Windows 8.1',
+            '10.0': 'Windows 10',
+          }[mMajorSubsystemVersion + '.' + mMinorSubsystemVersion]
+        }`)
+        printf(`OptionalHeader.mWin32VersionValue = ${mWin32VersionValue = nextU32()}`) // uint32_t mWin32VersionValue
+        printf(`OptionalHeader.mSizeOfImage = ${mSizeOfImage = nextU32()}`) // uint32_t mSizeOfImage
+        printf(`OptionalHeader.mSizeOfHeaders = ${mSizeOfHeaders = nextU32()}`) // uint32_t mSizeOfHeaders
+        printf(`OptionalHeader.mCheckSum = ${mCheckSum = nextU32()}`) // uint32_t mCheckSum
+        printf(`OptionalHeader.mSubsystem = ${mSubsystem = nextU16()}`) // uint16_t mSubsystem
+        printf(`OptionalHeader.mDllCharacteristics = ${mDllCharacteristics = nextU16()}`) // uint16_t mDllCharacteristics
+        if (mMagic != 0x010b) printf(`OptionalHeader.mSizeOfStackReserve = ${mSizeOfStackReserve = nextU64()}`)
+        if (mMagic == 0x010b) printf(`OptionalHeader.mSizeOfStackReserve = ${mSizeOfStackReserve = nextU32()}`)
+        if (mMagic != 0x010b) printf(`OptionalHeader.mSizeOfStackCommit = ${mSizeOfStackCommit = nextU64()}`)
+        if (mMagic == 0x010b) printf(`OptionalHeader.mSizeOfStackCommit = ${mSizeOfStackCommit = nextU32()}`)
+        if (mMagic != 0x010b) printf(`OptionalHeader.mSizeOfHeapReserve = ${mSizeOfHeapReserve = nextU64()}`)
+        if (mMagic == 0x010b) printf(`OptionalHeader.mSizeOfHeapReserve = ${mSizeOfHeapReserve = nextU32()}`)
+        if (mMagic != 0x010b) printf(`OptionalHeader.mSizeOfHeapCommit = ${mSizeOfHeapCommit = nextU64()}`)
+        if (mMagic == 0x010b) printf(`OptionalHeader.mSizeOfHeapCommit = ${mSizeOfHeapCommit = nextU32()}`)
+        printf(`OptionalHeader.mLoaderFlags = ${mLoaderFlags = nextU32()}`) // uint32_t mLoaderFlags
+        printf(`OptionalHeader.mNumberOfRvaAndSizes = ${mNumberOfRvaAndSizes = nextU32()}`) //  uint32_t mNumberOfRvaAndSizes
+
+        const mSubsystemMeaning = [
+          "IMAGE_SUBSYSTEM_UNKNOWN",
+          "IMAGE_SUBSYSTEM_NATIVE",
+          "IMAGE_SUBSYSTEM_WINDOWS_GUI",
+          "IMAGE_SUBSYSTEM_WINDOWS_CUI",
+          "IMAGE_SUBSYSTEM_OS2_CUI",
+          "IMAGE_SUBSYSTEM_POSIX_CUI",
+          "IMAGE_SUBSYSTEM_NATIVE_WINDOWS",
+          "IMAGE_SUBSYSTEM_WINDOWS_CE_GUI",
+          "IMAGE_SUBSYSTEM_EFI_APPLICATION",
+          "IMAGE_SUBSYSTEM_EFI_BOOT_ SERVICE_DRIVER",
+          "IMAGE_SUBSYSTEM_EFI_RUNTIME_ DRIVER",
+          "IMAGE_SUBSYSTEM_EFI_ROM",
+          "IMAGE_SUBSYSTEM_XBOX",
+          "IMAGE_SUBSYSTEM_WINDOWS_BOOT_APPLICATION",
+        ];
+
+        const mNumberOfRvaAndSizesMeaning = [
+          "Export table address and size - IMAGE_DIRECTORY_ENTRY_EXPORT",
+          "Import table address and size - IMAGE_DIRECTORY_ENTRY_IMPORT",
+          "Resource table address and size - IMAGE_DIRECTORY_ENTRY_RESOURCE",
+          "Exception table address and size - IMAGE_DIRECTORY_ENTRY_EXCEPTION",
+          "Certificate table address and size - IMAGE_DIRECTORY_ENTRY_SECURITY",
+          "Base relocation table address and size - IMAGE_DIRECTORY_ENTRY_BASERELOC",
+          "Debugging information starting address and size - IMAGE_DIRECTORY_ENTRY_DEBUG",
+          "Architecture-specific data address and size - IMAGE_DIRECTORY_ENTRY_ARCHITECTURE",
+          "Global pointer register relative virtual address - IMAGE_DIRECTORY_ENTRY_GLOBALPTR",
+          "Thread local storage (TLS) table address and size - IMAGE_DIRECTORY_ENTRY_TLS",
+          "Load configuration table address and size - IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG",
+          "Bound import table address and size - IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT",
+          "Import address table address and size - IMAGE_DIRECTORY_ENTRY_IAT",
+          "Delay import descriptor address and size - IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT",
+          "The CLR header address and size - IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR",
+          "Reserved",
+        ];
+
+        const IMAGE_DIRECTORY_ENTRY_EXPORT = 0 // Export Directory
+        const IMAGE_DIRECTORY_ENTRY_IMPORT = 1 // Import Directory
+        const IMAGE_DIRECTORY_ENTRY_RESOURCE = 2 // Resource Directory
+        const IMAGE_DIRECTORY_ENTRY_EXCEPTION = 3 // Exception Directory
+        const IMAGE_DIRECTORY_ENTRY_SECURITY = 4 // Security Directory
+        const IMAGE_DIRECTORY_ENTRY_BASERELOC = 5 // Base Relocation Table
+        const IMAGE_DIRECTORY_ENTRY_DEBUG = 6 // Debug Directory
+        const IMAGE_DIRECTORY_ENTRY_COPYRIGHT = 7 // (X86 usage)
+        const IMAGE_DIRECTORY_ENTRY_ARCHITECTURE = 7 // Architecture Specific Data
+        const IMAGE_DIRECTORY_ENTRY_GLOBALPTR = 8 // RVA of GP
+        const IMAGE_DIRECTORY_ENTRY_TLS = 9 // TLS Directory
+        const IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG = 10 // Load Configuration Directory
+        const IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT = 11 // Bound Import Directory in headers
+        const IMAGE_DIRECTORY_ENTRY_IAT = 12 // Import Address Table
+        const IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT = 13 // Delay Load Import Descriptors
+        const IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR = 14 // COM Runtime descriptor
+
+        function readStringz() {
+          let name = ''
+          while (name.length < 1024) {
+            let char = nextU8()
+            if (char == 0) break
+            name += String.fromCharCode(char)
+          }
+          return name
+        }
+
+        let rva = 0
+        let imports = []
+        //at = 120//optionalAt + mSizeOfOptionalHeader - 1
+        //at = 120//optionalAt + mSizeOfOptionalHeader - 1
+        printf(`RVAs start at ${at} byte`)
+        while (rva < mNumberOfRvaAndSizes) {
+          const VirtualAddress = nextU32()
+          const Size = nextU32()
+          printf(`<strong>${mNumberOfRvaAndSizesMeaning[rva]}</strong>`)
+          printf(`imageDataDirectory[${rva}].VirtualAddress = ${VirtualAddress}`)
+          printf(`imageDataDirectory[${rva}].Size = ${Size}`)
+
+          function readImageSectionHeader() {
+            return {
+              mName: String.fromCharCode(
+                nextU8(),
+                nextU8(),
+                nextU8(),
+                nextU8(),
+
+                nextU8(),
+                nextU8(),
+                nextU8(),
+                nextU8()
+              ),
+              mVirtualSize: nextU32(),
+              mVirtualAddress: nextU32(),
+              mSizeOfRawData: nextU32(),
+              mPointerToRawData: nextU32(),
+              mPointerToRealocations: nextU32(),
+              mPointerToLinenumbers: nextU32(),
+              mNumberOfRealocations: nextU16(),
+              mNumberOfLinenumbers: nextU16(),
+              mCharacteristics: nextU32(),
+            }
+          }
+
+          function virtualToSection(VirtualAddress) {
+            let imageSectionHeader = 0
+            let virtualSectionStart = -1
+            let blobSectionStart = -1
+            const atPos = at
+            at = optionalAt + mSizeOfOptionalHeader
+            while (imageSectionHeader < mNumberOfSections) {
+              const section = readImageSectionHeader()
+
+              if (section.mVirtualAddress <= VirtualAddress && section.mVirtualAddress > virtualSectionStart) {
+                virtualSectionStart = section.mVirtualAddress
+                blobSectionStart = section.mPointerToRawData + (VirtualAddress - section.mVirtualAddress)
+              }
+
+              //              nextU32() // mName
+              //              nextU32() // mName
+              //              nextU32() // mVirtualSize
+              //              const mVirtualAddress = nextU32()
+              //              nextU32() // mSizeOfRawData
+              //              const mPointerToRawData = nextU32() // mPointerToRawData
+              //              printf('>>>mVirtualAddress:' + mVirtualAddress + ' mPointerToRawData:' + mPointerToRawData)
+              //
+              //              if (mVirtualAddress <= VirtualAddress && mVirtualAddress > virtualSectionStart) {
+              //                virtualSectionStart = mVirtualAddress
+              //                blobSectionStart = mPointerToRawData
+              //              }
+              //
+              imageSectionHeader++
+            }
+            at = atPos
+            return blobSectionStart
+          }
+
+          // DLL imports
+          if (rva == IMAGE_DIRECTORY_ENTRY_IMPORT && VirtualAddress > 0) {
+            const atPos = at
+
+            //            let imageSectionHeader = 0
+            //            let virtualSectionStart = -1
+            //            let blobSectionStart = -1
+            //            at = optionalAt + mSizeOfOptionalHeader
+            //            while (imageSectionHeader < mNumberOfSections) {
+            //              const section = readImageSectionHeader()
+            //
+            //              if (section.mVirtualAddress <= VirtualAddress && section.mVirtualAddress > virtualSectionStart) {
+            //                virtualSectionStart = section.mVirtualAddress
+            //                blobSectionStart = section.mPointerToRawData + (VirtualAddress - section.mVirtualAddress)
+            //              }
+            //
+            //              //              nextU32() // mName
+            //              //              nextU32() // mName
+            //              //              nextU32() // mVirtualSize
+            //              //              const mVirtualAddress = nextU32()
+            //              //              nextU32() // mSizeOfRawData
+            //              //              const mPointerToRawData = nextU32() // mPointerToRawData
+            //              //              printf('>>>mVirtualAddress:' + mVirtualAddress + ' mPointerToRawData:' + //mPointerToRawData)
+            //              //
+            //              //              if (mVirtualAddress <= VirtualAddress && mVirtualAddress > virtualSectionStart) {
+            //              //                virtualSectionStart = mVirtualAddress
+            //              //                blobSectionStart = mPointerToRawData
+            //              //              }
+            //              //
+            //              imageSectionHeader++
+            //            }
+            //
+            //            at = blobSectionStart
+
+            at = virtualToSection(VirtualAddress)
+
+            printf('>>>blobSectionStart:' + at)
+
+            function readImageImportDescriptor() {
+              return {
+                OriginalFirstThunk: nextU32(),
+                TimeDateStamp: nextU32(),
+                ForwarderChain: nextU32(),
+                Name: nextU32(),
+                FirstThunk: nextU32()
+              }
+            }
+
+            let iid = readImageImportDescriptor()
+            const iids = []
+            while (iid.OriginalFirstThunk != 0) {
+              if (iid.OriginalFirstThunk == 0) break
+              iids.push(iid)
+              iid = readImageImportDescriptor()
+            }
+
+            printf(JSON.stringify(iids))
+
+            for (const iid of iids) {
+              let name = ''
+              at = virtualToSection(iid.Name)
+              while (true) {
+                let char = nextU8()
+                if (char == 0) break
+                name += String.fromCharCode(char)
+              }
+              printf('iid.Name = ' + name)
+
+              function readImageThunkData() {
+                const union = nextU32()
+                if (bits64) nextU32()
+                return {
+                  Function: union,
+                  Ordinal: union,
+                  AddressOfData: union
+                }
+              }
+
+              at = virtualToSection(iid.OriginalFirstThunk)
+              let thunk = readImageThunkData()
+              const thunks = []
+              while (thunk.AddressOfData != 0) {
+                //while (thunks.length != 6) {
+                thunks.push(thunk)
+                thunk = readImageThunkData()
+              }
+
+              printf('thunks:' + JSON.stringify(thunks))
+
+              //while (thunk.AddressOfData != 0) {
+              for (const thunk of thunks) {
+                if ((thunk.Ordinal & 0x80000000) > 0) {
+                  const Ord = thunk.Ordinal & 0xffff;
+                  printf(`import ${name}.@${Ord} - at address: ${thunk.Function}`);
+                } else {
+
+
+                  function readImageImportByName(offset) {
+                    const atPos = at
+                    at = offset
+                    const result = {
+                      Hint: nextU16(),
+                      Name: readStringz()
+                    }
+
+                    at = atPos
+                    return result
+                  }
+
+                  const ibn = readImageImportByName(virtualToSection(thunk.AddressOfData))
+
+                  printf(`import ${name}.${ibn.Name}@${ibn.Hint} - at address: ${thunk.Function}`)
+                }
+                //  thunk = readImageThunkData()
+              }
+
+
+
+              //              let pThunkOrg = (IMAGE_THUNK_DATA * )((uint64_t) exe + iid - > OriginalFirstThunk);
+              //              let funcRef;
+              //              funcRef = (FARPROC * )((uint64_t) exe + iid - > FirstThunk);
+              //
+              //              HINSTANCE hLibrary = LoadLibraryA(szName);
+
+              //              while (pThunkOrg - > u1.AddressOfData != 0) {
+              //                let szImportName;
+              //                let Ord;
+              //                let fun = (mainDef) funcVoid;
+              //
+              //                if ((pThunkOrg - > u1.Ordinal & 0x80000000) > 0) {
+              //                  Ord = pThunkOrg - > u1.Ordinal & 0xffff;
+              //                  printf("import {%s}.@%d - at address: {%d} <------------ NOT IMPLEMENTED YET!\n", szName, Ord, pThunkOrg - >// u1.Function);
+              //                  fflush(0);
+              //                } else {
+              //                  IMAGE_IMPORT_BY_NAME * pIBN = (IMAGE_IMPORT_BY_NAME * )((uint64_t) exe + pThunkOrg - > u1.AddressOfData);
+              //
+              //                  //if (!Interop.IsBadReadPtr((void*)pIBN, (uint)sizeof(IMAGE_IMPORT_BY_NAME)))
+              //                  {
+              //                    Ord = pIBN - > Hint;
+              //                    szImportName = (char * ) pIBN - > Name;
+              //                    //string sImportName = Marshal.PtrToStringAnsi((IntPtr)szImportName); // yes i know i am a lazy ass
+              //                    printf("import {%s}.{%s}@%d - at address: {%d}\n", szName, szImportName, Ord, pThunkOrg - > u1.Function)//;
+              //                    fflush(0);
+              //                    fun = (mainDef) GetProcAddress(hLibrary, szImportName);
+              //                  }
+              //                  //else
+              //                  //{
+              //                  //    printf("Bad ReadPtr Detected or EOF on Imports");
+              //                  //    break;
+              //                  //}
+              //                }
+              //
+              //                //auto at = (uint64_t)pThunkOrg->u1.Function + (uint64_t)exe;
+              //                //auto atp = (FARPROC **)at;
+              //                //atp[0] = &func;
+              //
+              //
+              //
+              //                pThunkOrg++;
+              //              };
+
+            }
+
+            //            let lastIID = at
+            //            while (true) {
+            //              at = lastIID
+            //              const iid = readImageImportDescriptor()
+            //              lastIID = at
+            //
+            //              printf(JSON.stringify(iid))
+            //
+            //              let name = ''
+            //              at = virtualToSection(iid.Name)
+            //              //let char = 0
+            //              //while ((char = nextU8()) != 0) name += String.fromCharCode(char)
+            //              while (true) {
+            //                let char = nextU8()
+            //                if (char == 0) break
+            //                name += String.fromCharCode(char)
+            //              }
+            //
+            //              printf('iid.Name = ' + name)
+            //
+            //              //printf('>>>' + String.fromCharCode(nextU8(), nextU8(), nextU8(), nextU8()))
+            //              //printf('>>>' + String.fromCharCode(nextU8(), nextU8(), nextU8(), nextU8()))
+            //              //printf('>>>' + String.fromCharCode(nextU8(), nextU8(), nextU8(), nextU8()))
+            //              //printf('>>>' + String.fromCharCode(nextU8(), nextU8(), nextU8(), nextU8()))
+            //              if (iid.OriginalFirstThunk == 0) break
+            //            }
+
+            at = atPos
+          }
+
+          // DLL exports
+          if (rva == IMAGE_DIRECTORY_ENTRY_EXPORT && VirtualAddress > 0) {
+            const atPos = at
+
+            at = virtualToSection(VirtualAddress)
+
+            function readImageExportDirectory() {
+              return {
+                Characteristics: nextU32(),
+                TimeDateStamp: nextU32(),
+                MajorVersion: nextU16(),
+                MinorVersion: nextU16(),
+                Name: nextU32(),
+                Base: nextU32(),
+                NumberOfFunctions: nextU32(),
+                NumberOfNames: nextU32(),
+                AddressOfFunctions: nextU32(), // RVA from base of image
+                AddressOfNames: nextU32(), // RVA from base of image
+                AddressOfNameOrdinals: nextU32() // RVA from base of image
+              }
+            }
+
+            let ied = readImageExportDirectory()
+            printf('ied:' + JSON.stringify(ied))
+
+            let nameRef = virtualToSection(ied.AddressOfNames)
+            let ordinal = virtualToSection(ied.AddressOfNameOrdinals)
+            //at = virtualToSection(ied.AddressOfNames)
+            //let nameRef = nextU32()
+            //at = virtualToSection(ied.AddressOfNameOrdinals)
+            //let ordinal = /*virtualToSection*/(ied.AddressOfNames)
+            //let ordinal = nextU32()
+
+            for (var i = 0; i < ied.NumberOfNames; i++) {
+              //at = virtualToSection(nameRef)
+              at = nameRef
+              at = nextU32()
+              at = virtualToSection(at)
+              let name = readStringz()
+
+              at = ordinal
+              //at = nextU32()
+              //let ord = nextU16()
+              let ord = nextU16()
+
+              at = ied.AddressOfFunctions + ord * 4
+              at = virtualToSection(at)
+              let address = nextU32()
+
+              printf('' + name + ' @' + ord + ' at 0x' + address.toString(16))
+              //at = (nameRef)
+              //printf('nameRef:' + readStringz())
+              nameRef += 4
+              ordinal += 2
+            }
+
+            at = atPos
+          }
+
+          if (rva == IMAGE_DIRECTORY_ENTRY_RESOURCE && VirtualAddress > 0) {
+            const atPos = at
+
+            function nextImageResourceDirectory() {
+              return {
+                Characteristics: nextU32(),
+                TimeDateStamp: nextU32(),
+                MajorVersion: nextU16(),
+                MinorVersion: nextU16(),
+                NumberOfNamedEntries: nextU16(),
+                NumberOfIdEntries: nextU16(),
+              }
+            }
+
+            function nextImageResourceDirectoryEntry() {
+              return {
+                Name: '0x' + nextU32().toString(16),
+                OffsetToData: '0x' + nextU32().toString(16) // & 0x7fffffff
+              }
+            }
+
+            function nextImageResourceDataEntry() {
+              return {
+                OffsetToData: nextU32(),
+                Size: nextU32(),
+                CodePage: nextU32(),
+                Reserved: nextU32(),
+              }
+            }
+
+            //const depth = []
+
+            //function scanImageResourceDirectory(offset) {
+            //
+            //
+            //}
+
+            {
+
+              console.log(`  Type Table: Char: 0, Time: 00000000, Ver: 0/0, Num Names: 1, IDs: 6`)
+            }
+
+            //const json = scanImageResourceDirectory(virtualToSection(VirtualAddress))
+            //console.log(json)
+            //printf('.rsrc:' + JSON.stringify(json, null, '\t'))
+
+
+            //            at = virtualToSection(VirtualAddress)
+            //
+            //            let t = '!'
+            //            for (var i = 0; i < Size; i++) {
+            //              t += String.fromCharCode(nextU8())
+            //            }
+            //            console.log(t)
+            //
+            at = virtualToSection(VirtualAddress)
+
+            printf('rootResources:' + at)
+            let rootResources = nextImageResourceDirectory()
+
+            printf('rootResources:' + JSON.stringify(rootResources))
+
+            //const sizeofImageResourceDirectory = 4+4 + 2+2 + 2+2
+            //at = virtualToSection(VirtualAddress) + sizeofImageResourceDirectory
+
+            for (var i = 0; i < rootResources.NumberOfNamedEntries; i++) {
+              const irde = nextImageResourceDirectoryEntry()
+              printf('nextImageResourceDirectoryEntry:' + JSON.stringify(irde))
+              //push(virtualToSection(VirtualAddress) + (parseInt(irde.Name) & 0x7FFFFFFF))
+              //printf('nextImageResourceDirectoryEntry:' + readStringz())
+              //pop()
+
+              push(virtualToSection(VirtualAddress) + (parseInt(irde.OffsetToData) & 0x7FFFFFFF))
+              const ird = nextImageResourceDirectory()
+              printf('nextImageResourceDirectory:' + JSON.stringify(ird))
+              for (var i = 0; i < ird.NumberOfIdEntries; i++) {
+                const irde = nextImageResourceDirectoryEntry()
+                printf('nextImageResourceDirectoryEntry:' + JSON.stringify(irde))
+              }
+              pop()
+
+            }
+
+            //push(virtualToSection(VirtualAddress) + 0xc28)
+            //printf('readStringz():' + readStringz())
+            //pop()
+
+            for (var i = 0; i < rootResources.NumberOfIdEntries; i++) {
+              printf('nextImageResourceDirectoryEntry:' + JSON.stringify(nextImageResourceDirectoryEntry()))
+            }
+
+
+            at = virtualToSection(VirtualAddress)
+
+            function recursiveDirectory() {
+
+            }
+
+            function recursiveEntry() {
+
+            }
+
+
+
+            //printf('nextImageResourceDirectoryEntry:' + JSON.stringify(nextImageResourceDirectoryEntry()))
+            //printf('nextImageResourceDirectoryEntry:' + JSON.stringify(nextImageResourceDirectoryEntry()))
+            //printf('nextImageResourceDirectoryEntry:' + JSON.stringify(nextImageResourceDirectoryEntry()))
+            //printf('nextImageResourceDirectoryEntry:' + JSON.stringify(nextImageResourceDirectoryEntry()))
+
+
+
+            at = atPos
+          }
+
+          rva++
+        }
+
+        let imageSectionHeader = 0
+        at = optionalAt + mSizeOfOptionalHeader
+        printf(`Section headers start at ${at} byte`)
+        while (imageSectionHeader < mNumberOfSections) {
+          printf(JSON.stringify(readImageSectionHeader()))
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mName = ${String.fromCharCode(
+          //            nextU8(),
+          //            nextU8(),
+          //            nextU8(),
+          //            nextU8(),
+          //
+          //            nextU8(),
+          //            nextU8(),
+          //            nextU8(),
+          //            nextU8()
+          //          )}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mVirtualSize = ${nextU32()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mVirtualAddress = ${nextU32()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mSizeOfRawData = ${nextU32()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mPointerToRawData = ${nextU32()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mPointerToRealocations = ${nextU32()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mPointerToLinenumbers = ${nextU32()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mNumberOfRealocations = ${nextU16()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mNumberOfLinenumbers = ${nextU16()}`);
+          //          printf(`imageSectionHeader[${imageSectionHeader}].mCharacteristics = ${nextU32()}`);
+          imageSectionHeader++
+        }
+
+
+
+      }
+
+      document.getElementById('gallery').innerHTML = result.join('\n')
+    }
+    reader.readAsArrayBuffer(file)
+  }
+
+  </script>
+</body>
+
+</html>
