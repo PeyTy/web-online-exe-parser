@@ -992,7 +992,7 @@
                           idCount: nextU16(),
                         }
 
-                        let best = { bWidth: 0, wBitCount: 0 }
+                        let best = { bWidth: 0, wBitCount: 0, dwBytesInRes: 0 }
                         RT_ICON_BEST = null
 
                         new Array(GRPICONDIR.idCount).fill(0).forEach(() => { // Find largest
@@ -1008,8 +1008,7 @@
                           }
 
                           if (
-                            (GRPICONDIRENTRY.bWidth > best.bWidth || best.bWidth == 0) &&
-                            (GRPICONDIRENTRY.wBitCount > best.wBitCount)
+                            GRPICONDIRENTRY.dwBytesInRes > best.dwBytesInRes
                           ) {
                             best = GRPICONDIRENTRY
                           }
