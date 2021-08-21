@@ -141,6 +141,26 @@
     files.forEach(previewFile)
   }
 
+  function sanitizeHTML(text) {
+    var element = document.createElement('div')
+    element.innerText = text
+    return element.innerHTML
+  }
+
+  function picToBase64(bytes) {
+    let src = ''
+
+    const slice = 1024
+    const parts = (bytes.length / slice) | 0
+
+    new Array(parts).fill(0).forEach((_, part) => {
+      const pos = part * slice
+      src += String.fromCharCode.apply(null, new Uint8Array(bytes.slice(
+        pos,
+        pos + slice
+      )))
+    })
+
   function previewFile(file) {
     let reader = new FileReader()
     //reader.readAsDataURL(file)
