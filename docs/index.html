@@ -161,7 +161,7 @@
       )))
     })
 
-    src += String.fromCharCode.apply(null, new Uint8Array(bytes.slice(slice * (parts + 1))))
+    src += String.fromCharCode.apply(null, new Uint8Array(bytes.slice(slice * (parts))))
 
     return 'data:image/png;base64,' + btoa(src)
   }
