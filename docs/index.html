@@ -161,6 +161,11 @@
       )))
     })
 
+    src += String.fromCharCode.apply(null, new Uint8Array(bytes.slice(slice * (parts + 1))))
+
+    return 'data:image/png;base64,' + btoa(src)
+  }
+
   function previewFile(file) {
     let reader = new FileReader()
     //reader.readAsDataURL(file)
@@ -844,8 +849,11 @@
         let imageSectionHeader = 0
         at = optionalAt + mSizeOfOptionalHeader
         printf(`Section headers start at ${at} byte`)
+        let rsrc = null
         while (imageSectionHeader < mNumberOfSections) {
-          printf(JSON.stringify(readImageSectionHeader()))
+          const header = readImageSectionHeader()
+          printf(JSON.stringify(header))
+          if (header.mName.startsWith('.rsrc')) rsrc = header
           //          printf(`imageSectionHeader[${imageSectionHeader}].mName = ${String.fromCharCode(
           //            nextU8(),
           //            nextU8(),
@@ -869,7 +877,183 @@
           imageSectionHeader++
         }
 
+        function readResDir(at) {
+          push(at)
+          const result = {
+            Characteristics: nextU32(),
+            TimeDateStamp: nextU32(),
+            MajorVersion: nextU16(),
+            MinorVersion: nextU16(),
+            NumberOfNamedEntries: nextU16(),
+            NumberOfIdEntries: nextU16(),
+          }
 
+          pop()
+          return result
+        }
+
+        if (rsrc) {
+          const IDI_APPLICATION = 32512
+          const RT_GROUP_ICON = 14
+          const RT_ICON = 3
+          const RT_ICONs = new Map() // Ordinal : Offsets in file
+          let RT_ICON_BEST = null
+
+          printf('Parsing .rsrc section:')
+          push(rsrc.mPointerToRawData)
+
+          const dir = readResDir(rsrc.mPointerToRawData)
+          printf(JSON.stringify(dir))
+          const dirSize = 4 + 4 + 2 * 4
+
+          seek(rsrc.mPointerToRawData + dirSize)
+          // TODO Named
+          new Array(dir.NumberOfIdEntries).fill(0).map(() => { // By Type
+            const entry = {
+              ID: nextU32(),
+              OffsetToData: nextU32()
+            }
+
+            printf(`-> ` + JSON.stringify(entry))
+
+            const isRT_ICON = entry.ID == RT_ICON
+            const isRT_GROUP_ICON = entry.ID == RT_GROUP_ICON
+
+            {
+              const dirAt = rsrc.mPointerToRawData + (entry.OffsetToData & 0x7fffffff)
+              const dir = readResDir(dirAt)
+              printf(`->-> ` + JSON.stringify(dir))
+
+              push(dirAt + dirSize)
+              // TODO Named
+              new Array(dir.NumberOfIdEntries).fill(0).map(() => { // By Name
+                const entry = {
+                  ID: nextU32(),
+                  OffsetToData: nextU32()
+                }
+
+                printf(`->->-> ` + JSON.stringify(entry))
+
+                const ID = entry.ID
+
+                {
+                  const dirAt = rsrc.mPointerToRawData + (entry.OffsetToData & 0x7fffffff)
+                  const dir = readResDir(dirAt)
+                  printf(`->->->-> ` + JSON.stringify(dir))
+
+                  push(dirAt + dirSize)
+                  // TODO Named
+                  new Array(dir.NumberOfIdEntries).fill(0).map(() => { // By Language
+                    const entry = {
+                      ID: nextU32(),
+                      OffsetToData: nextU32()
+                    }
+
+                    printf(`->->->->-> ` + JSON.stringify(entry))
+
+                    {
+                      push(rsrc.mPointerToRawData + (entry.OffsetToData & 0x7fffffff))
+                      const data = {
+                        OffsetToData: nextU32(),
+                        Size: nextU32(),
+                        CodePage: nextU32(),
+                        Reserved: nextU32(),
+                      }
+
+                      printf(`->->->->-> ` + JSON.stringify(data))
+                      const offset = virtualToSection(data.OffsetToData)
+                      seek(offset)
+                      printf(`->->->->-> file offset = ` + at)
+
+                      if (isRT_ICON) {
+                        RT_ICONs.set(ID, offset)
+                      }
+
+                      if (isRT_GROUP_ICON) {
+                        seek(offset)
+                        const GRPICONDIR = {
+                          idReserved: nextU16(),
+                          idType: nextU16(),
+                          idCount: nextU16(),
+                        }
+
+                        let best = { bWidth: 0, wBitCount: 0 }
+                        RT_ICON_BEST = null
+
+                        new Array(GRPICONDIR.idCount).fill(0).forEach(() => { // Find largest
+                          const GRPICONDIRENTRY = {
+                            bWidth: nextU8(),
+                            bHeight: nextU8(),
+                            bColorCount: nextU8(),
+                            bReserved: nextU8(),
+                            wPlanes: nextU16(),
+                            wBitCount: nextU16(),
+                            dwBytesInRes: nextU32(),
+                            nID: nextU16(),
+                          }
+
+                          if (
+                            (GRPICONDIRENTRY.bWidth > best.bWidth || best.bWidth == 0) &&
+                            (GRPICONDIRENTRY.wBitCount > best.wBitCount)
+                          ) {
+                            best = GRPICONDIRENTRY
+                          }
+                        })
+
+                        printf(`->->->->-> GRPICONDIRENTRY = ` + JSON.stringify(best))
+                        RT_ICON_BEST = best.wBitCount ? best : null
+                      }
+
+                      pop()
+                    }
+                  })
+
+                  pop()
+                }
+              })
+
+              pop()
+            }
+          })
+
+          pop()
+
+          // Render icon
+          if (RT_ICON_BEST) {
+            push(RT_ICONs.get(RT_ICON_BEST.nID))
+            const bytes = [
+              // .ico header
+              0, 0, 1, 0, 1, 0,
+              RT_ICON_BEST.bWidth,
+              RT_ICON_BEST.bHeight,
+              0, 0,
+              0, 0,
+              0, 0,
+
+              RT_ICON_BEST.dwBytesInRes & 0xFF,
+              RT_ICON_BEST.dwBytesInRes & 0xFF << 8,
+              RT_ICON_BEST.dwBytesInRes & 0xFF << 16,
+              RT_ICON_BEST.dwBytesInRes & 0xFF << 24,
+
+              22, 0, 0, 0
+            ]
+
+            if (bytes.length != 22) console.error('bytes.length != 22')
+
+            while (bytes.length < RT_ICON_BEST.dwBytesInRes + 22) {
+              bytes.push(nextU8())
+            }
+
+            document.getElementById('icons').innerHTML = '<img id="iconPreview" src=""/>'
+
+            document.getElementById("iconPreview").src = picToBase64(bytes)
+
+            pop()
+          }
+
+          printf('Parsing .rsrc complete.')
+          console.log(RT_ICONs)
+        }
 
       }
 
