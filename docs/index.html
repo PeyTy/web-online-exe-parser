@@ -925,11 +925,26 @@
               printf(`->-> ` + JSON.stringify(dir))
 
               push(dirAt + dirSize)
-              // TODO Named
-              new Array(dir.NumberOfIdEntries).fill(0).map(() => { // By Name
+
+              new Array(dir.NumberOfIdEntries).fill(0).map(_ => entryByName(false))
+              new Array(dir.NumberOfNamedEntries).fill(0).map(_ => entryByName(true))
+
+              function entryByName(named) { // By Name
                 const entry = {
                   ID: nextU32(),
                   OffsetToData: nextU32()
+                }
+
+                if (named) {
+                  push(rsrc.mPointerToRawData + (entry.ID & 0x7fffffff))
+                  let length = nextU16()
+                  const text = []
+                  while (length) {
+                    text.push(nextU16())
+                    length--
+                  }
+                  pop()
+                  entry.ID = String.fromCharCode.apply(null, new Uint8Array(text))
                 }
 
                 printf(`->->-> ` + JSON.stringify(entry))
@@ -1010,7 +1025,7 @@
 
                   pop()
                 }
-              })
+              }
 
               pop()
             }
